@@ -129,21 +129,32 @@ sin cambios.
 
 ```bash
 pip install -r requirements.txt
-cp .env.example .env      # completar credenciales
-python app.py             # waitress en el puerto $PORT (5000 por defecto)
+cp .env.example .env               # completar credenciales
+cp clinics.example.json clinics.json
+python app.py                      # waitress en el puerto $PORT (5000 por defecto)
 ```
 
-En producción, vía `Procfile`:
+`python app.py` **es también el arranque de producción**: levanta waitress, que
+es un servidor WSGI de producción. En el servidor Windows de LOLIMSA el proceso
+se envuelve como servicio con NSSM, siguiendo la convención del resto de
+backends (`D:\backend\<app>\`, servicios `LOLCLI_*`):
 
 ```
-web: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 50 --timeout 120
+nssm install LOLCLI_BOT_DOBLE "D:\backend\...\venv\Scripts\python.exe" "app.py"
+nssm set LOLCLI_BOT_DOBLE AppDirectory "D:\backend\..."
 ```
 
-> **`--workers 1` no es negociable.** Las sesiones, los locks de conversación y
+> `AppDirectory` es obligatorio: `python-dotenv` busca el `.env` en el
+> directorio de trabajo del proceso. Sin él el servicio arranca igual, pero sin
+> credenciales, y el bot responde "dificultades técnicas" desde el primer
+> mensaje. (`clinics.json` y `reminders.json` sí se resuelven contra la carpeta
+> del proyecto, así que no dependen de esto.)
+
+> **Un solo proceso, no negociable.** Las sesiones, los locks de conversación y
 > el registro de mensajes ya procesados viven en la memoria del proceso. Con más
-> de un worker, dos mensajes del mismo usuario pueden caer en procesos distintos
-> y ver sesiones distintas. Para escalar a varios workers hay que mover ese
-> estado a un almacén externo (Redis).
+> de uno, dos mensajes del mismo usuario pueden caer en procesos distintos y ver
+> sesiones distintas. Para escalar a varios hay que mover ese estado a un
+> almacén externo (Redis).
 
 Muchos hilos sí es seguro y necesario: cada mensaje saliente espera
 `SEND_PACING_SECONDS` antes de enviarse y varios pasos mandan dos o tres

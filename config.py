@@ -74,7 +74,7 @@ DEFAULT_CLINIC_ID = ""
 # La ruta se resuelve contra este archivo y no contra el directorio actual: el
 # bot de quirófanos abría "clinics.json" en relativo y sólo arrancaba bien si el
 # proceso se lanzaba parado en la carpeta del proyecto, que es un detalle fácil
-# de perder al pasar por gunicorn o por un servicio de systemd.
+# de perder al envolver el proceso como servicio (NSSM, systemd).
 CLINICS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "clinics.json")
 
 # Claves que puede traer una clínica, con el valor por defecto que se toma del
