@@ -1,0 +1,9 @@
+.env
+# Lleva el token de LOLCLI en claro. Se versiona clinics.example.json.
+clinics.json
+venv/
+__pycache__/
+*.pyc
+reminders.json
+whatsapp_bot_ariel
+whatsapp_bot_quirofano

@@ -1,0 +1,14 @@
+{
+  "clinic_id": {
+    "lolcli_url": "http://HOST:PUERTO/LolcliApi/api",
+    "lolcli_url_pacientes": "http://HOST:PUERTO/LolcliApi/api",
+    "lolcli_url_quirofanos": "http://HOST:PUERTO/LolcliApi/api",
+    "lolcli_token": "BASE64_DE_usuario:clave",
+    "lolcli_entidad": "CODIGO_DE_ENTIDAD",
+    "evolution_instance": "NOMBRE_DE_LA_INSTANCIA",
+    "default_siscod": 1,
+    "staff_phone": "TELEFONO_CON_CODIGO_DE_PAIS",
+    "support_email": "correo@ejemplo.com",
+    "support_hours": "Lunes a Viernes, 8am - 6pm"
+  }
+}
