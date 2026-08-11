@@ -415,6 +415,56 @@ def replay_state_prompt(state, session, phone_to_reply, headers):
         )
         session["options"] = formatted_options
         send_whatsapp_message(phone_to_reply, reply)
+    elif state in ("AWAITING_DOC_TYPE", "AWAITING_DOC_TYPE_FOR_REEVAL"):
+        _pedir_tipo_documento(
+            session,
+            phone_to_reply,
+            "Sin problema, empecemos de nuevo. Selecciona tu tipo de documento:",
+            state,
+        )
+    elif state in ("AWAITING_DOC_NUMBER", "AWAITING_DOC_NUMBER_FOR_REEVAL"):
+        send_whatsapp_message(
+            phone_to_reply,
+            f"Claro. Ingresa nuevamente tu número de {session.get('tiddes', 'documento')}.",
+        )
+    elif state == "AWAITING_TIME":
+        _mostrar_horarios(
+            session,
+            phone_to_reply,
+            headers,
+            fecha_api=session.get("fecha_api", ""),
+            invnum=0,
+            titulo="⏰ Volvamos a los horarios. Elige el de tu preferencia:",
+            cierre="_Elige la hora (solo el número)._",
+            siguiente_estado="AWAITING_TIME",
+        )
+    elif state == "AWAITING_APPOINTMENT_TYPE":
+        send_whatsapp_message(
+            phone_to_reply,
+            "Volvamos a la modalidad. ¿La cita será *Presencial* (1) o *Virtual* (2)?",
+        )
+    elif state == "AWAITING_TARIFF":
+        # Las tarifas siguen en session["options"] porque show_final_summary no
+        # las pisa, así que se re-arma el menú sin volver a pedírselas a LOLCLI
+        # ni recalcular el precio de cada una. Si por lo que sea no están, se
+        # retrocede un paso más (la modalidad), que es lo que las regenera.
+        tarifas = [o["data"] for o in session.get("options", [])]
+        if tarifas:
+            reply, formatted_options = format_menu(
+                "Volvamos a las tarifas. Elige una de nuevo:",
+                tarifas,
+                "tarcod",
+                "tardes",
+                key_price="precio",
+            )
+            session["options"] = formatted_options
+            send_whatsapp_message(phone_to_reply, reply)
+        else:
+            session["state"] = "AWAITING_APPOINTMENT_TYPE"
+            send_whatsapp_message(
+                phone_to_reply,
+                "Volvamos un paso más. ¿La cita será *Presencial* (1) o *Virtual* (2)?",
+            )
     else:
         send_whatsapp_message(
             phone_to_reply,
@@ -858,8 +908,14 @@ def handle(session_key, session, phone_to_reply, message_text, selected_id, lolc
     if message_text.lower() == "retroceder" and state != "START":
         history = session.get("history", [])
         if len(history) > 1:
-            history.pop()
-            previous_state = history[-1] if history else "START"
+            # 'history' guarda el paso que el usuario YA contestó, así que su
+            # último elemento ES el paso al que hay que volver: pop() lo
+            # devuelve y lo quita de una vez, para que un segundo "retroceder"
+            # siga uno más atrás. Antes se hacía pop() y después se leía
+            # history[-1], lo que saltaba un paso: desde AWAITING_SPECIALTY caía
+            # en AWAITING_DOC_NUMBER y, al no estar contemplado en
+            # replay_state_prompt, borraba la sesión entera del paciente.
+            previous_state = history.pop()
             session["state"] = previous_state
             replay_state_prompt(previous_state, session, phone_to_reply, lolcli_headers)
             return "reverted"
