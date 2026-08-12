@@ -37,6 +37,10 @@ from core.utils import (
 
 ROLE = "paciente"
 
+# Nombre de este flujo en la configuración (clinics.json / .env): resuelve su
+# URL y su token de LOLCLI, que pueden ser distintos de los del otro flujo.
+LOLCLI_FLOW = "pacientes"
+
 PRESET_HORARIOS = [
     {"hora": "0800"}, {"hora": "0830"}, {"hora": "0900"}, {"hora": "0930"},
     {"hora": "1000"}, {"hora": "1030"}, {"hora": "1100"}, {"hora": "1130"},
@@ -96,7 +100,7 @@ REMINDERS_FILE = os.path.join(
 
 
 def _url(endpoint):
-    return lolcli.url("pacientes", endpoint)
+    return lolcli.url(LOLCLI_FLOW, endpoint)
 
 
 # ---------------------------------------------------------------------------
@@ -126,7 +130,7 @@ def preload_lists(clinic_id, clinic):
         return destino
 
     headers = {
-        "Authorization": f"Basic {clinic.get('lolcli_token', '')}",
+        "Authorization": f"Basic {config.clinic_lolcli_token(clinic, LOLCLI_FLOW)}",
         "Content-Type": "application/json",
     }
     try:

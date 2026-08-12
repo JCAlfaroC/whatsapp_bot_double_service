@@ -331,7 +331,7 @@ def _handle_message(key_sesion, phone, message_text, selected_id):
             return "role_not_recognized"
         session["role"] = elegido
         print(f"INFO: {phone} eligió el servicio '{elegido}'.")
-        FLOWS[elegido].start(session, phone, config.lolcli_headers())
+        FLOWS[elegido].start(session, phone, config.lolcli_headers(FLOWS[elegido].LOLCLI_FLOW))
         return "role_selected"
 
     if not role:
@@ -351,7 +351,7 @@ def _handle_message(key_sesion, phone, message_text, selected_id):
         return "role_menu"
 
     resultado = flow.handle(
-        key_sesion, session, phone, message_text, selected_id, config.lolcli_headers()
+        key_sesion, session, phone, message_text, selected_id, config.lolcli_headers(flow.LOLCLI_FLOW)
     )
 
     # Un flujo puede pedir la derivación a una persona cuando la reconoce por

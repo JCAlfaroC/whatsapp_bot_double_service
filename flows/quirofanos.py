@@ -26,6 +26,10 @@ from core.utils import (
 
 ROLE = "medico"
 
+# Nombre de este flujo en la configuración (clinics.json / .env): resuelve su
+# URL y su token de LOLCLI, que pueden ser distintos de los del otro flujo.
+LOLCLI_FLOW = "quirofanos"
+
 # Endpoints según "Documentos APIS QUirofanos_V2.docx". Los marcados como
 # verificados responden 200 en producción.
 LOLCLI_ENDPOINTS = {
@@ -88,7 +92,7 @@ FOOTER = "LOLIMSA Quirófanos"
 
 
 def _call(endpoint_key, payload, headers, timeout=8):
-    return lolcli.call("quirofanos", LOLCLI_ENDPOINTS[endpoint_key], payload, headers, timeout)
+    return lolcli.call(LOLCLI_FLOW, LOLCLI_ENDPOINTS[endpoint_key], payload, headers, timeout)
 
 
 # ---------------------------------------------------------------------------

@@ -118,10 +118,11 @@ def bloque_configuracion():
                 anotar("config", f"[{cid}] URL de LOLCLI ({flujo})", OK, url)
             else:
                 anotar("config", f"[{cid}] URL de LOLCLI ({flujo})", FALLA, "sin definir")
-        if clinic.get("lolcli_token"):
-            anotar("config", f"[{cid}] token de LOLCLI", OK, "presente")
-        else:
-            anotar("config", f"[{cid}] token de LOLCLI", FALLA, "vacío")
+        for flujo in ("pacientes", "quirofanos"):
+            if config.clinic_lolcli_token(clinic, flujo):
+                anotar("config", f"[{cid}] token de LOLCLI ({flujo})", OK, "presente")
+            else:
+                anotar("config", f"[{cid}] token de LOLCLI ({flujo})", FALLA, "vacío")
         if not clinic.get("lolcli_entidad"):
             anotar("config", f"[{cid}] entidad", AVISO, "vacía")
 
@@ -130,14 +131,18 @@ def bloque_lolcli():
     print(f"\n{'─' * 74}\n LOLCLI\n{'─' * 74}")
 
     for cid, clinic in config.CLINICS.items():
-        headers = {
-            "Authorization": f"Basic {clinic.get('lolcli_token', '')}",
-            "Content-Type": "application/json",
-        }
         siscod = clinic.get("default_siscod", 1)
         entidad = clinic.get("lolcli_entidad", "")
 
+        def _headers(flujo):
+            # Por flujo: cada servidor de LOLCLI tiene sus propias credenciales.
+            return {
+                "Authorization": f"Basic {config.clinic_lolcli_token(clinic, flujo)}",
+                "Content-Type": "application/json",
+            }
+
         # --- Flujo de pacientes (sólo lectura) ---
+        headers = _headers("pacientes")
         base = config.clinic_lolcli_url(clinic, "pacientes")
         if base:
             estado, detalle, data = _sondear(
@@ -166,6 +171,7 @@ def bloque_lolcli():
                 anotar("lolcli", f"[{cid}] pacientes · {grabador}", OMITIDO, "graba: no se prueba")
 
         # --- Flujo de quirófanos ---
+        headers = _headers("quirofanos")
         base = config.clinic_lolcli_url(clinic, "quirofanos")
         if not base:
             continue

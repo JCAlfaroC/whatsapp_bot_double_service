@@ -102,6 +102,12 @@ _CLINIC_DEFAULTS = {
     "lolcli_url_pacientes": lambda: (os.getenv("LOLCLI_API_URL_PACIENTES") or "").rstrip("/"),
     "lolcli_url_quirofanos": lambda: (os.getenv("LOLCLI_API_URL_QUIROFANOS") or "").rstrip("/"),
     "lolcli_token": lambda: os.getenv("LOLCLI_API_TOKEN", ""),
+    # Los dos flujos pueden vivir en servidores LOLCLI distintos, y cada
+    # servidor tiene sus propias credenciales: el bot de pacientes apuntaba a
+    # una máquina y el de quirófanos a otra, con tokens distintos. Igual que
+    # con las URL, si sólo se define 'lolcli_token' los dos flujos usan ese.
+    "lolcli_token_pacientes": lambda: os.getenv("LOLCLI_API_TOKEN_PACIENTES", ""),
+    "lolcli_token_quirofanos": lambda: os.getenv("LOLCLI_API_TOKEN_QUIROFANOS", ""),
     "lolcli_entidad": lambda: os.getenv("LOLCLI_ENTIDAD", ""),
     "evolution_instance": lambda: EVOLUTION_INSTANCE_NAME,
     "default_siscod": lambda: int(os.getenv("DEFAULT_SISCOD", 1)),
@@ -170,13 +176,25 @@ def _avisar_configuracion_incompleta():
             print(f"ADVERTENCIA: clínica '{cid}' sin URL de LOLCLI para el flujo de pacientes.")
         if not clinic_lolcli_url(cfg, "quirofanos"):
             print(f"ADVERTENCIA: clínica '{cid}' sin URL de LOLCLI para el flujo de quirófanos.")
-        if not cfg.get("lolcli_token"):
-            print(f"ADVERTENCIA: clínica '{cid}' sin lolcli_token.")
+        for flujo in ("pacientes", "quirofanos"):
+            if not clinic_lolcli_token(cfg, flujo):
+                print(f"ADVERTENCIA: clínica '{cid}' sin token de LOLCLI para el flujo de {flujo}.")
 
 
 def clinic_lolcli_url(clinic, flow):
     """URL de LOLCLI de esa clínica para ese flujo ('pacientes'|'quirofanos')."""
     return (clinic.get(f"lolcli_url_{flow}") or clinic.get("lolcli_url") or "").rstrip("/")
+
+
+def clinic_lolcli_token(clinic, flow):
+    """Token de LOLCLI de esa clínica para ese flujo.
+
+    Existe por lo mismo que clinic_lolcli_url: los dos flujos pueden apuntar a
+    servidores LOLCLI distintos, y un token que vale en uno no tiene por qué
+    valer en el otro. Con un solo 'lolcli_token' para ambos, apuntar el flujo
+    de pacientes a su servidor real dejaba de funcionar por credenciales.
+    """
+    return clinic.get(f"lolcli_token_{flow}") or clinic.get("lolcli_token") or ""
 
 
 def bind_request_context(clinic_id):
@@ -188,7 +206,6 @@ def bind_request_context(clinic_id):
     clinic = CLINICS[clinic_id]
     g.clinic_id = clinic_id
     g.clinic = clinic
-    g.lolcli_token = clinic["lolcli_token"]
     g.lolcli_entidad = clinic["lolcli_entidad"]
     g.evolution_instance = clinic["evolution_instance"]
     g.default_siscod = clinic["default_siscod"]
@@ -201,8 +218,14 @@ def lolcli_url(flow):
     return clinic_lolcli_url(g.clinic, flow)
 
 
-def lolcli_headers():
+def lolcli_headers(flow):
+    """Cabeceras para el flujo indicado ('pacientes'|'quirofanos').
+
+    Pide el flujo explícitamente porque el token puede ser distinto en cada
+    uno; app.py lo sabe al despachar (cada módulo de flows declara su
+    LOLCLI_FLOW).
+    """
     return {
-        "Authorization": f"Basic {g.lolcli_token}",
+        "Authorization": f"Basic {clinic_lolcli_token(g.clinic, flow)}",
         "Content-Type": "application/json",
     }
