@@ -54,20 +54,58 @@ def _log_evolution_error(label, e):
     print(f"ERROR {label}: {e}{detalle}")
 
 
+# Un reintento y no más: el envío se hace con el lock de la conversación
+# tomado, así que cada espera aquí retrasa también el siguiente mensaje del
+# mismo usuario.
+_REINTENTOS_ENVIO = 1
+_ESPERA_REINTENTO = 1.0
+
+
+def _es_transitorio(e):
+    """¿Tiene sentido reintentar este fallo?
+
+    Los cortes de red y los 5xx del gateway suelen resolverse solos. Un 4xx no:
+    significa que Evolution rechazó lo que se le mandó (número mal formado,
+    instancia inexistente, payload inválido), y reintentarlo sólo gasta el
+    presupuesto de tiempo del usuario para volver a fallar igual.
+    """
+    if isinstance(e, (requests.exceptions.ConnectionError, requests.exceptions.Timeout)):
+        return True
+    resp = getattr(e, "response", None)
+    return resp is not None and resp.status_code >= 500
+
+
 def send_whatsapp_message(phone, text, instance=None):
+    """Manda un texto por WhatsApp. Devuelve True si Evolution lo aceptó.
+
+    Devuelve el resultado a propósito: hay mensajes que no son decorativos —la
+    confirmación de una reserva de quirófano, un enlace de pago— y quien los
+    manda necesita poder saber si salieron. Antes esta función no devolvía
+    nada, así que un fallo de Evolution era indistinguible de un envío
+    correcto: el flujo avanzaba de estado igual y daba por entregado algo que
+    el usuario nunca recibió.
+    """
     # La pausa antes de cada envío es a propósito: ver SEND_PACING_SECONDS.
     time.sleep(config.SEND_PACING_SECONDS)
     inst = _resolve_instance(instance)
-    try:
-        requests.post(
-            f"{config.EVOLUTION_API_URL}/message/sendText/{inst}",
-            json={"number": phone, "text": text},
-            headers=_evolution_headers(),
-            timeout=config.EVOLUTION_TIMEOUT,
-        ).raise_for_status()
-        print(f"[TEXT] → {phone}")
-    except requests.exceptions.RequestException as e:
-        _log_evolution_error("send_whatsapp_message", e)
+
+    for intento in range(_REINTENTOS_ENVIO + 1):
+        try:
+            requests.post(
+                f"{config.EVOLUTION_API_URL}/message/sendText/{inst}",
+                json={"number": phone, "text": text},
+                headers=_evolution_headers(),
+                timeout=config.EVOLUTION_TIMEOUT,
+            ).raise_for_status()
+            print(f"[TEXT] → {phone}")
+            return True
+        except requests.exceptions.RequestException as e:
+            if intento < _REINTENTOS_ENVIO and _es_transitorio(e):
+                print(f"ADVERTENCIA send_whatsapp_message: fallo transitorio, reintentando -- {e}")
+                time.sleep(_ESPERA_REINTENTO)
+                continue
+            _log_evolution_error("send_whatsapp_message", e)
+            return False
 
 
 def _menu_en_texto(phone, body, titulos, inst):
@@ -81,7 +119,7 @@ def _menu_en_texto(phone, body, titulos, inst):
     No duerme: send_whatsapp_message ya espera SEND_PACING_SECONDS.
     """
     lineas = "\n".join(f"*{i}.* {t}" for i, t in enumerate(titulos, 1))
-    send_whatsapp_message(phone, f"{body}\n\n{lineas}", inst)
+    return send_whatsapp_message(phone, f"{body}\n\n{lineas}", inst)
 
 
 def send_button_message(phone, body, buttons, instance=None, title="", footer="LOLIMSA"):
@@ -89,8 +127,7 @@ def send_button_message(phone, body, buttons, instance=None, title="", footer="L
     inst = _resolve_instance(instance)
 
     if not config.EVOLUTION_INTERACTIVE:
-        _menu_en_texto(phone, body, [b["title"] for b in buttons], inst)
-        return
+        return _menu_en_texto(phone, body, [b["title"] for b in buttons], inst)
 
     time.sleep(config.SEND_PACING_SECONDS)
     payload = {
@@ -111,10 +148,11 @@ def send_button_message(phone, body, buttons, instance=None, title="", footer="L
             timeout=config.EVOLUTION_TIMEOUT,
         ).raise_for_status()
         print(f"[BUTTONS] → {phone}")
+        return True
     except requests.exceptions.RequestException as e:
         _log_evolution_error("send_button_message", e)
         print("  -- falling back to text")
-        _menu_en_texto(phone, body, [b["title"] for b in buttons], inst)
+        return _menu_en_texto(phone, body, [b["title"] for b in buttons], inst)
 
 
 def send_list_message(phone, body, sections, instance=None, title="", button_text="Ver opciones", footer=""):
@@ -133,8 +171,7 @@ def send_list_message(phone, body, sections, instance=None, title="", button_tex
     titulos = [row["title"] for sec in sections for row in sec.get("rows", [])]
 
     if not config.EVOLUTION_INTERACTIVE:
-        _menu_en_texto(phone, body, titulos, inst)
-        return
+        return _menu_en_texto(phone, body, titulos, inst)
 
     time.sleep(config.SEND_PACING_SECONDS)
     api_sections = [
@@ -163,10 +200,11 @@ def send_list_message(phone, body, sections, instance=None, title="", button_tex
             timeout=config.EVOLUTION_TIMEOUT,
         ).raise_for_status()
         print(f"[LIST] → {phone}")
+        return True
     except requests.exceptions.RequestException as e:
         _log_evolution_error("send_list_message", e)
         print("  -- falling back to text")
-        _menu_en_texto(phone, body, titulos, inst)
+        return _menu_en_texto(phone, body, titulos, inst)
 
 
 # ---------------------------------------------------------------------------

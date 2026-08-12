@@ -28,6 +28,7 @@ import locale
 import os
 import threading
 import time
+import traceback
 
 from flask import Flask, g, jsonify, request
 
@@ -227,8 +228,39 @@ def webhook_handler(clinic_id=None):
     # sobre su sesión) sin bloquear a los demás, que pueden estar escribiendo al
     # mismo tiempo -- el servidor atiende varias peticiones en paralelo.
     with sessions.get_lock(key_sesion):
-        status = _handle_message(key_sesion, sender, message_text, selected_id)
+        try:
+            status = _handle_message(key_sesion, sender, message_text, selected_id)
+        except Exception:
+            status = _fallo_no_controlado(key_sesion, sender)
     return jsonify({"status": status})
+
+
+def _fallo_no_controlado(key_sesion, phone):
+    """Última red: un error no previsto dentro de un flujo.
+
+    Varias llamadas a LOLCLI de flows/pacientes.py no están envueltas en
+    try/except. Sin esta red, una caída de LOLCLI en cualquiera de ellas sube
+    como excepción hasta Flask, que responde HTTP 500, y entonces pasan dos
+    cosas malas a la vez: el usuario no recibe NADA -- la conversación se corta
+    a media frase, después de un "Buscando fechas disponibles..." -- y
+    Evolution, al ver un 5xx, reintenta el mismo webhook.
+
+    Se responde 200 a propósito: el mensaje ya se procesó (bien o mal) y
+    reintentarlo sólo duplicaría el trabajo. El dedup de sessions atrapa el
+    reintento, pero es mejor no provocarlo.
+
+    El traceback completo va al log porque es la única pista que queda de un
+    fallo que, por definición, nadie previó.
+    """
+    traceback.print_exc()
+    print(f"ERROR no controlado ({key_sesion}): ver traceback arriba")
+    send_whatsapp_message(
+        phone,
+        "😔 Tuvimos un problema técnico procesando tu mensaje.\n\n"
+        "Escribe *'inicio'* para empezar de nuevo o *'asesor'* si prefieres "
+        "que te atienda una persona.",
+    )
+    return "unhandled_error"
 
 
 def _handle_message(key_sesion, phone, message_text, selected_id):

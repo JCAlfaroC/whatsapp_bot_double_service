@@ -1498,7 +1498,27 @@ def handle(session_key, session, phone_to_reply, message_text, selected_id, lolc
 # ---------------------------------------------------------------------------
 
 def _registrar_cita(session, session_key, phone_to_reply, lolcli_headers):
-    """Graba la cita en LOLCLI y arranca el cobro."""
+    """Graba la cita en LOLCLI y arranca el cobro.
+
+    El guardia de invnum_cita evita grabar dos veces la misma cita. Hace falta
+    porque el estado NO cambia al registrar: si RegistroCita funciona pero
+    falla el paso siguiente (el enlace de pago), la sesión sigue en
+    AWAITING_CONFIRMATION y al usuario se le dice "intenta de nuevo" -- con lo
+    que vuelve a contestar "sí", vuelve a entrar aquí, y sin este guardia se le
+    grabaría una segunda cita idéntica en LOLCLI. En un sistema clínico eso no
+    es un reintento: es una cita duplicada que alguien tiene que anular a mano.
+    """
+    if session.get("invnum_cita"):
+        print(f"INFO: cita ya registrada (invnum={session['invnum_cita']}); "
+              f"no se vuelve a grabar, se reintenta sólo el cobro.")
+        send_whatsapp_message(
+            phone_to_reply,
+            f"Tu cita *{session['invnum_cita']}* ya quedó registrada. "
+            f"Vuelvo a generar tu enlace de pago...",
+        )
+        generate_payment_link_and_send(session, phone_to_reply, lolcli_headers)
+        return "processed"
+
     try:
         send_whatsapp_message(phone_to_reply, "¡Excelente! Registrando tu cita, un momento por favor...")
         fecref_str = datetime.strptime(
