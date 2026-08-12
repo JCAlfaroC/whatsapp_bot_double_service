@@ -13,7 +13,7 @@ Nada de esto cambia el flujo de conversación: son las mismas pantallas.
 
 ---
 
-## Ya hecho (commit `dbcb9fb`)
+## Ya hecho · primera tanda (`dbcb9fb`)
 
 | | Qué era | Qué es |
 |---|---|---|
@@ -25,7 +25,24 @@ Nada de esto cambia el flujo de conversación: son las mismas pantallas.
 
 ---
 
-## P0 — Integridad de datos clínicos
+## Ya hecho · segunda tanda (integridad clínica)
+
+Los cinco puntos que estaban marcados como P0 quedan cerrados. Ninguno cambió
+una sola pantalla del flujo: cambian lo que el bot hace cuando algo falla.
+
+| | Qué era | Qué es |
+|---|---|---|
+| Horarios inventados | Ante cualquier fallo mostraba una lista fija y el paciente podía reservar un cupo inexistente | No se ofrecen horarios que no se puedan respaldar; se distingue "no pudimos consultar" de "ese día está lleno" |
+| Cita creada informada como fallida | Un fallo al consultar el importe decía "error al registrar tu cita" y cerraba la sesión, borrando también la ALERTA | El cobro tiene su propio manejo: se le da el número de reserva, la sesión queda viva y la ALERTA se emite |
+| Reserva de quirófano ambigua | Un corte de red invitaba a reintentar, con riesgo de duplicar la separación | Sólo se invita a reintentar cuando consta que NO se grabó; si no, se manda a comprobar en "Mis reservas" |
+| Reprogramación cobrada sin aplicar | "Error al verificar tu pago o al reprogramar", que se lee como que quizá no se cobró | Se afirma que el cobro pasó y se deriva sólo el cambio de fecha |
+| Datos personales en el log | Documentos, historia clínica y nombres en claro | Documentos truncados (`****3001`), nombres e historia ocultos; el resto del payload intacto |
+
+Sigue pendiente, y no es técnico: fijar la **retención** de `out.log` y
+`error.log` y quién tiene acceso al servidor.
+
+
+## P0 — Integridad de datos clínicos (cerrado)
 
 Todo esto puede dejar registros inconsistentes en LOLCLI o dar por buena
 información que no lo es. Es lo que hay que cerrar antes de dar el bot por

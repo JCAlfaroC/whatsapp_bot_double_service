@@ -126,3 +126,41 @@ def format_menu(title, items, key_id, key_name, key_price=None):
         "\n_También puedes escribir *'retroceder'* o *'salir'*._"
     )
     return menu_text, formatted_items
+
+
+# --- Datos personales en el registro de actividad -------------------------
+# Claves que identifican a una persona y que no deben quedar en claro en
+# out.log: el log rota a disco, se conserva y lo lee cualquiera con acceso al
+# servidor. Son las que viajan en los payloads de LOLCLI y en sus respuestas.
+_CLAVES_DOCUMENTO = ("pacdoc", "meddoc", "nro_documento", "documento")
+_CLAVES_RESERVADAS = ("pachis", "pacpmn", "mednam", "paciente_nombre")
+
+
+def _enmascarar_valor(clave, valor):
+    if not isinstance(valor, (str, int)):
+        return valor
+    texto = str(valor)
+    if clave in _CLAVES_DOCUMENTO:
+        # Se conservan los últimos 4 dígitos: alcanzan para cruzar una queja
+        # concreta con su línea de log, y no identifican a nadie por sí solos.
+        return f"****{texto[-4:]}" if len(texto) > 4 else "****"
+    return "***"
+
+
+def enmascarar(dato):
+    """Copia de 'dato' con los identificadores personales ocultos.
+
+    Se aplica justo antes de imprimir, nunca antes de enviar: lo que viaja a
+    LOLCLI tiene que seguir siendo el valor real. Recorre diccionarios y listas
+    porque las respuestas traen los pacientes anidados ('paciente': [{...}]).
+    """
+    if isinstance(dato, dict):
+        return {
+            k: (_enmascarar_valor(k, v)
+                if k in _CLAVES_DOCUMENTO or k in _CLAVES_RESERVADAS
+                else enmascarar(v))
+            for k, v in dato.items()
+        }
+    if isinstance(dato, list):
+        return [enmascarar(x) for x in dato]
+    return dato

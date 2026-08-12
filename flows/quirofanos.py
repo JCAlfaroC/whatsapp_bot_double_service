@@ -18,6 +18,7 @@ import config
 from core import lolcli, sessions
 from core.messaging import send_list_message, send_whatsapp_message
 from core.utils import (
+    enmascarar,
     format_date_es,
     format_duration_es,
     normalize_text,
@@ -977,7 +978,36 @@ def _confirm_booking(session, phone, lolcli_headers):
             )
             session["horas_sel"] = []
             _ask_horas(session, phone, lolcli_headers)
+        elif resp_data is None:
+            # NO hubo respuesta legible del servidor (corte de red, timeout o
+            # respuesta que no es JSON), así que no se sabe si LOLCLI llegó a
+            # grabar la separación o no.
+            #
+            # Este es el único caso en el que NO se invita a reintentar. Antes
+            # caía en el "Intenta de nuevo" de abajo, y confirmar otra vez
+            # podía grabar la MISMA franja dos veces: un quirófano reservado
+            # por duplicado es un conflicto de agenda que alguien tiene que
+            # deshacer a mano. El guardia por invnum no cubre esto, porque
+            # invnum sólo se guarda cuando hubo respuesta.
+            print(f"ALERTA: RegistrarSeparacionQuirofanoWsp sin respuesta legible. "
+                  f"médico={session.get('mednam', '?')} ({session.get('medcod', '')}), "
+                  f"teléfono={phone}, payload={enmascarar(payload)}. "
+                  f"Puede haber quedado grabada: requiere verificación manual.")
+            send_whatsapp_message(
+                phone,
+                "⚠️ No recibimos confirmación del servidor, así que *no sabemos si la "
+                "reserva quedó registrada*.\n\n"
+                "Para no duplicarla, revísala antes de volver a confirmar.",
+            )
+            send_whatsapp_message(
+                phone,
+                "Escribe *'continuar'* para volver al menú y entrar en *Mis reservas*. "
+                "Si no aparece, puedes reservarla de nuevo.",
+            )
+            session["state"] = "AWAITING_POST_FLOW"
         else:
+            # LOLCLI respondió y rechazó la operación: la separación no se
+            # grabó, así que reintentar es seguro.
             send_whatsapp_message(
                 phone, f"❌ No se pudo registrar la reserva: {err}. Intenta de nuevo."
             )

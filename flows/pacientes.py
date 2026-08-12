@@ -29,6 +29,7 @@ import config
 from core import lolcli, sessions
 from core.messaging import send_whatsapp_message
 from core.utils import (
+    enmascarar,
     format_date_es,
     format_menu,
     normalize_text,
@@ -40,13 +41,6 @@ ROLE = "paciente"
 # Nombre de este flujo en la configuración (clinics.json / .env): resuelve su
 # URL y su token de LOLCLI, que pueden ser distintos de los del otro flujo.
 LOLCLI_FLOW = "pacientes"
-
-PRESET_HORARIOS = [
-    {"hora": "0800"}, {"hora": "0830"}, {"hora": "0900"}, {"hora": "0930"},
-    {"hora": "1000"}, {"hora": "1030"}, {"hora": "1100"}, {"hora": "1130"},
-    {"hora": "1400"}, {"hora": "1430"}, {"hora": "1500"}, {"hora": "1530"},
-    {"hora": "1600"}, {"hora": "1700"},
-]
 
 # Tipos de cita que ARIE no considera "citas" para efectos de
 # consulta/reprogramación.
@@ -801,7 +795,7 @@ def _validar_paciente(tidcod, doc_number, lolcli_headers):
     )
     data = response.json()
     print(f"INFO: ValidarPacienteWsp (tidcod={tidcod}) -> HTTP {response.status_code}, "
-          f"respuesta: {data}")
+          f"respuesta: {enmascarar(data)}")
     server_error = response.status_code >= 500 or data.get("code") == 500
     pacientes = data.get("paciente", []) if not server_error else []
     return pacientes, server_error
@@ -862,15 +856,18 @@ def _mostrar_horarios(session, phone_to_reply, lolcli_headers, fecha_api, invnum
                       titulo, cierre, siguiente_estado):
     """Pantalla de horarios de un día, común a agendar y a reprogramar.
 
+    Devuelve True sólo si llegó a mostrar horarios reales. Si devuelve False no
+    toca 'options' ni 'state': el paciente sigue donde estaba y puede elegir
+    otra fecha con 'retroceder', en vez de quedarse frente a una lista de horas
+    que el sistema no puede respaldar.
+
     'invnum' llega sin convertir a entero a propósito: al reprogramar sale de
     'secuencia' (una fila de ListarCitasPacientesWsp) y puede venir vacío, así
     que la conversión tiene que quedar DENTRO del try. Si se hace al llamar, un
-    'secuencia' ausente revienta con TypeError, el webhook responde 500 y
-    Evolution reintenta el mismo mensaje en vez de que el paciente vea los
-    horarios de respaldo.
+    'secuencia' ausente revienta con TypeError y el webhook responde 500.
     """
     try:
-        horarios_raw = requests.post(
+        respuesta = requests.post(
             _url("ListaCuposDetalle"),
             json={
                 "siscod": int(session["siscod"]),
@@ -881,11 +878,37 @@ def _mostrar_horarios(session, phone_to_reply, lolcli_headers, fecha_api, invnum
             },
             headers=lolcli_headers,
             timeout=config.LOLCLI_TIMEOUT,
-        ).json().get("horarios", [])
-        horarios = [h for h in horarios_raw if h.get("estado") == "D"] or PRESET_HORARIOS
+        )
+        fallo_tecnico = respuesta.status_code >= 500
+        horarios_raw = respuesta.json().get("horarios", []) if not fallo_tecnico else []
     except Exception as e:
         print(f"ERROR ListaCuposDetalle: {e}")
-        horarios = PRESET_HORARIOS
+        fallo_tecnico, horarios_raw = True, []
+
+    if fallo_tecnico:
+        # Antes, ante cualquier fallo se mostraba una lista fija de horarios
+        # (PRESET_HORARIOS) sin avisar. El paciente elegía una hora de esa lista
+        # y esa hora viajaba tal cual a RegistroCita: se podía reservar un cupo
+        # que nunca estuvo abierto. Un horario inventado es peor que no mostrar
+        # ninguno, así que ahora se dice la verdad.
+        print("ERROR ListaCuposDetalle: no se muestran horarios (fallo técnico).")
+        send_whatsapp_message(
+            phone_to_reply,
+            "😔 No pudimos consultar los horarios de esa fecha en este momento.\n\n"
+            "Escribe *'retroceder'* para elegir otra fecha, o inténtalo en unos minutos. 🙏",
+        )
+        return False
+
+    horarios = [h for h in horarios_raw if h.get("estado") == "D"]
+    if not horarios:
+        # LOLCLI respondió bien: ese día está lleno. Es una respuesta legítima,
+        # no un error, y merece un mensaje distinto del anterior.
+        send_whatsapp_message(
+            phone_to_reply,
+            "📅 No quedan horarios disponibles para esa fecha.\n\n"
+            "Escribe *'retroceder'* para elegir otra. 😊",
+        )
+        return False
 
     reply = f"{titulo}\n\n"
     opts = []
@@ -897,6 +920,7 @@ def _mostrar_horarios(session, phone_to_reply, lolcli_headers, fecha_api, invnum
     session["options"] = opts
     session["state"] = siguiente_estado
     send_whatsapp_message(phone_to_reply, reply)
+    return True
 
 
 def _fechas_unicas(all_cupos):
@@ -925,7 +949,7 @@ def _citas_del_paciente(doc_number, tipo, lolcli_headers):
         timeout=config.LOLCLI_TIMEOUT,
     )
     data = response.json()
-    print(f"INFO: ListarCitasPacientesWsp (tipo={tipo}, doc={doc_number}) respuesta: {data}")
+    print(f"INFO: ListarCitasPacientesWsp (tipo={tipo}, doc={enmascarar({'pacdoc': doc_number})['pacdoc']}) respuesta: {enmascarar(data)}")
     server_error = response.status_code >= 500 or data.get("code") == 500
     citas = [c for c in data.get("citas", []) if c] if not server_error else []
     return citas, server_error
@@ -1615,28 +1639,60 @@ def _registrar_cita(session, session_key, phone_to_reply, lolcli_headers):
             session["invnum_cita"] = response_data.get("invnum")
             session["prfnum_cita"] = response_data.get("prfnum")
 
-            costo_final = 0.0
-            if session["prfnum_cita"]:
-                time.sleep(2)
-                response_pagos = requests.post(
-                    _url("ListaPagosPendientes"),
-                    json={"pachis": session["pachis"]},
-                    headers=lolcli_headers,
-                    timeout=config.LOLCLI_TIMEOUT,
-                )
-                if response_pagos.ok:
-                    for pago in response_pagos.json().get("pendientes", []):
-                        if str(pago.get("prfnum")) == str(session["prfnum_cita"]):
-                            costo_final = float(pago.get("prfppac", 0.0))
-                            break
+            # A PARTIR DE AQUÍ LA CITA YA EXISTE EN LOLCLI.
+            #
+            # Todo lo que sigue es el cobro, y tiene su propio try por eso: si
+            # falla, lo que falló es el cobro, no el registro. Antes compartía
+            # el try de arriba, así que un corte de red al consultar el importe
+            # -- con la cita ya grabada -- acababa diciéndole al paciente
+            # "ocurrió un error al registrar tu cita" (falso) y cerrando la
+            # sesión con sessions.drop(). Eso además borraba la sesión antes de
+            # que el hilo de limpieza pudiera emitir la ALERTA, así que la cita
+            # quedaba grabada, sin cobrar y sin rastro para nadie.
+            try:
+                costo_final = 0.0
+                if session["prfnum_cita"]:
+                    time.sleep(2)
+                    response_pagos = requests.post(
+                        _url("ListaPagosPendientes"),
+                        json={"pachis": session["pachis"]},
+                        headers=lolcli_headers,
+                        timeout=config.LOLCLI_TIMEOUT,
+                    )
+                    if response_pagos.ok:
+                        for pago in response_pagos.json().get("pendientes", []):
+                            if str(pago.get("prfnum")) == str(session["prfnum_cita"]):
+                                costo_final = float(pago.get("prfppac", 0.0))
+                                break
+                    else:
+                        print(f"ADVERTENCIA ListaPagosPendientes: HTTP {response_pagos.status_code} "
+                              f"(invnum={session['invnum_cita']}); se continúa con importe 0.")
 
-            session["costo_total"] = costo_final
-            send_whatsapp_message(
-                phone_to_reply,
-                f"¡Tu cita ha sido agendada con la reserva *{session['invnum_cita']}*! 🎉\n"
-                f"Ahora, estoy generando tu enlace de pago por *S/ {costo_final:.2f}*.",
-            )
-            generate_payment_link_and_send(session, phone_to_reply, lolcli_headers)
+                session["costo_total"] = costo_final
+                send_whatsapp_message(
+                    phone_to_reply,
+                    f"¡Tu cita ha sido agendada con la reserva *{session['invnum_cita']}*! 🎉\n"
+                    f"Ahora, estoy generando tu enlace de pago por *S/ {costo_final:.2f}*.",
+                )
+                generate_payment_link_and_send(session, phone_to_reply, lolcli_headers)
+            except Exception as e:
+                # Misma cadena que usa sessions._avisar_tramite_a_medias, para
+                # que buscarla en el log encuentre los dos casos.
+                print(
+                    f"ALERTA: Cita registrada sin pago confirmado. "
+                    f"invnum={session['invnum_cita']}, "
+                    f"teléfono={phone_to_reply}. Requiere cancelación manual en LOLCLI. "
+                    f"Causa: {type(e).__name__}: {e}"
+                )
+                send_whatsapp_message(
+                    phone_to_reply,
+                    f"✅ Tu cita quedó registrada con la reserva *{session['invnum_cita']}*.\n\n"
+                    f"No pudimos generar el enlace de pago en este momento. Escribe *'asesor'* "
+                    f"y te ayudamos a completarlo. 🙏",
+                )
+                # La sesión NO se cierra: conserva el invnum, así que si expira
+                # por inactividad la alerta vuelve a emitirse con el número.
+                return "cita_registrada_sin_cobro"
         else:
             error_msg = response_data.get("message", "un error del sistema.")
             send_whatsapp_message(
@@ -1959,7 +2015,30 @@ def _confirmar_pago_reprogramacion(session, phone_to_reply, message_text, lolcli
                 )
                 _mensaje_post_flujo(phone_to_reply, session)
                 return "rescheduled"
-            raise Exception(result.get("xxmessage", result.get("message", "error desconocido")))
+
+            # EL PAGO YA ESTÁ CONFIRMADO (se comprobó arriba: status success y
+            # estado_pago COMPLETADO) y la reprogramación falló. Son dos hechos
+            # distintos y hay que decirlos por separado.
+            #
+            # Antes esto lanzaba una excepción que caía en el except general, y
+            # el paciente recibía "ocurrió un error al verificar tu pago o al
+            # reprogramar tu cita": se lee como que quizá el cobro no pasó,
+            # cuando el dinero ya salió. Lo que queda pendiente es el cambio de
+            # fecha, y eso lo resuelve una persona.
+            motivo = result.get("xxmessage", result.get("message", "error desconocido"))
+            print(
+                f"ALERTA: Reprogramación cobrada y NO aplicada. "
+                f"invnum={session.get('reschedule_invnum', '?')}, teléfono={phone_to_reply}. "
+                f"Motivo de ReagendarCitaWsp: {motivo}. Requiere aplicar el cambio a mano."
+            )
+            send_whatsapp_message(
+                phone_to_reply,
+                "✅ *Tu pago fue confirmado correctamente.*\n\n"
+                "⚠️ No pudimos aplicar el cambio de fecha en este momento, así que tu cita "
+                "sigue en su horario original.\n\n"
+                "Escribe *'asesor'* y una persona lo reprograma por ti sin volver a cobrarte. 🙏",
+            )
+            return "pago_confirmado_sin_reprogramar"
 
         current_status = payment_data.get("estado_pago", "desconocido")
         print(f"El estado del pago de reprogramación aún no es 'COMPLETADO'. Estado actual: {current_status}")

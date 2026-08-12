@@ -21,6 +21,7 @@ import time
 import requests
 
 import config
+from core.utils import enmascarar
 
 
 def url(flow, endpoint):
@@ -70,11 +71,11 @@ def call(flow, endpoint, payload, headers, timeout=None):
         # constancia de qué se había intentado enviar.
         ms = (time.monotonic() - inicio) * 1000
         print(f"ERROR {endpoint}: TRANSITORIO sin respuesta de {destino} tras {ms:.0f}ms "
-              f"-- {type(e).__name__}: {e} -- payload={payload}")
+              f"-- {type(e).__name__}: {e} -- payload={enmascarar(payload)}")
         return None, MSG_TRANSITORIO
 
     ms = (time.monotonic() - inicio) * 1000
-    print(f"INFO {endpoint}: POST {destino} payload={payload} -> HTTP {resp.status_code} ({ms:.0f}ms)")
+    print(f"INFO {endpoint}: POST {destino} payload={enmascarar(payload)} -> HTTP {resp.status_code} ({ms:.0f}ms)")
 
     if resp.status_code in (401, 403):
         print(f"ERROR {endpoint}: PERMANENTE credenciales rechazadas (HTTP {resp.status_code}). "
