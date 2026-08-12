@@ -42,92 +42,20 @@ Sigue pendiente, y no es técnico: fijar la **retención** de `out.log` y
 `error.log` y quién tiene acceso al servidor.
 
 
-## P0 — Integridad de datos clínicos (cerrado)
+## P0 — Lo único que queda abierto
 
-Todo esto puede dejar registros inconsistentes en LOLCLI o dar por buena
-información que no lo es. Es lo que hay que cerrar antes de dar el bot por
-productivo.
+### `retroceder` que falla corrompe el historial
 
-### 1. Cita creada, usuario informado de que falló, y sin rastro
+`flows/pacientes.py`, en el bloque que atiende 'retroceder'. El estado se
+retrocede **antes** de repintar la pantalla. Si la llamada a LOLCLI de ese
+repintado falla, el usuario no recibe nada y el historial ya se consumió: el
+siguiente `retroceder` salta dos pasos.
 
-`flows/pacientes.py` ~1555-1600. Si `RegistroCita` funciona pero falla
-`ListaPagosPendientes` (la llamada que averigua cuánto cobrar), el `except`
-general dice *"ocurrió un error al registrar tu cita"* —falso, la cita
-existe— y llama a `sessions.drop()`. Eso borra la sesión **antes** de que el
-hilo de limpieza pueda emitir el `ALERTA: Cita registrada sin pago
-confirmado`, que es la única red que había. Resultado: cita grabada, sin
-cobrar, sin avisar a nadie.
-
-**Arreglo:** separar el `except` del registro del `except` del cobro. Si la
-cita ya existe, el mensaje debe decirlo y conservar el `invnum`; nunca
-`drop()` una sesión con cita registrada y pago pendiente sin dejar la alerta.
-
-### 2. Horarios inventados que se pueden reservar
-
-`flows/pacientes.py` 819-857. `_mostrar_horarios` atrapa **cualquier**
-excepción y sustituye los cupos reales por la lista fija `PRESET_HORARIOS`,
-sin decírselo al usuario. Ese horario elegido viaja tal cual a `RegistroCita`
-y a `ReagendarCitaWsp`. El paciente puede reservar una hora que nunca estuvo
-disponible.
-
-**Arreglo:** si no se pueden leer los cupos reales, no ofrecer ninguno. Un
-"no puedo mostrarte horarios ahora" es correcto; una lista plausible e
-inventada, no.
-
-### 3. Una caída de LOLCLI se le presenta al paciente como "usted no existe"
-
-`flows/pacientes.py` 770-777 y 807-815. `_validar_paciente` no mira el código
-HTTP. Un 5xx que devuelva JSON vacío es indistinguible de "no encontrado", y
-el paciente recibe *"No encontramos ningún paciente registrado con ese
-documento… acércate personalmente"*, con la sesión cerrada. Se le manda a la
-clínica en persona por un fallo de servidor. El flujo de consulta de citas
-(879-889) **sí** distingue los dos casos; el de agendar no.
-
-**Arreglo:** copiar esa comprobación (`status_code >= 500`) a
-`_validar_paciente`.
-
-### 4. Reserva de quirófano potencialmente duplicada
-
-`flows/quirofanos.py` 909-968. El guardia por `invnum` sólo protege tras una
-respuesta **recibida y parseada**. Si `RegistrarSeparacionQuirofanoWsp` se
-corta por red, ni el bot ni el médico saben si la separación se grabó, y el
-mensaje invita a reintentar. Un quirófano reservado dos veces es un conflicto
-de agenda real.
-
-**Arreglo:** ante fallo ambiguo, no invitar a reintentar a ciegas: mandar al
-médico a "Mis reservas" a comprobar antes de volver a confirmar.
-
-### 5. Reprogramación cobrada que no se aplicó
-
-`flows/pacientes.py` 1819-1907. Si el pago se confirma y luego
-`ReagendarCitaWsp` falla, el mensaje dice *"error al verificar tu pago o al
-reprogramar tu cita"*, que se lee como que quizá no se cobró. Se cobró. La
-cita sigue en su fecha original.
-
-**Arreglo:** una vez confirmado el pago, el mensaje de fallo tiene que decir
-que el cobro está hecho y que la reprogramación queda pendiente de soporte,
-con el número de operación.
-
-### 6. `retroceder` que falla corrompe el historial
-
-`flows/pacientes.py` 908-921. El estado se retrocede **antes** de repintar la
-pantalla. Si la llamada a LOLCLI de ese repintado falla, el usuario no recibe
-nada y el historial ya se consumió: el siguiente `retroceder` salta dos pasos.
+Con la red de seguridad de `app.py` el usuario ya recibe un mensaje en vez de
+silencio, así que el síntoma es mucho menor que antes, pero el historial sigue
+quedando descuadrado.
 
 **Arreglo:** consumir el historial sólo si el repintado salió bien.
-
----
-
-## P0 — Datos personales en los registros
-
-`core/lolcli.py` imprime el `payload` completo de cada llamada, y ahí van
-`pacdoc` (DNI), `pachis` (historia clínica) y nombres. Eso acaba en
-`out.log`, en claro, rotando en disco, en una carpeta de perfil de usuario.
-Es el tipo de dato que una clínica no puede tratar así.
-
-**Arreglo:** enmascarar los campos identificatorios en el log (`pacdoc`,
-`pachis`, `meddoc`, nombres), dejando lo justo para diagnosticar
-(`pacdoc=****3001`). Y fijar retención de `out.log`/`error.log`.
 
 ---
 
