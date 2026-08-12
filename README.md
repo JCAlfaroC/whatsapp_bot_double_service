@@ -144,11 +144,18 @@ nssm install LOLCLI_BOT_DOBLE "D:\backend\...\venv\Scripts\python.exe" "app.py"
 nssm set LOLCLI_BOT_DOBLE AppDirectory "D:\backend\..."
 ```
 
-> `AppDirectory` es obligatorio: `python-dotenv` busca el `.env` en el
-> directorio de trabajo del proceso. Sin él el servicio arranca igual, pero sin
-> credenciales, y el bot responde "dificultades técnicas" desde el primer
-> mensaje. (`clinics.json` y `reminders.json` sí se resuelven contra la carpeta
-> del proyecto, así que no dependen de esto.)
+> Los tres archivos que el bot lee de disco —`.env`, `clinics.json` y
+> `reminders.json`— se resuelven contra la carpeta del código (`__file__`), no
+> contra el directorio de trabajo, así que ninguno depende de `AppDirectory`.
+> Conviene ponerlo igual por higiene, pero no es lo que carga las credenciales.
+>
+> Lo que sí muerde es que `load_dotenv()` **sube por el árbol de directorios**:
+> si falta el `.env` de la aplicación y hay uno en la carpeta que la contiene
+> (`D:\backend\.env`), el bot arranca con las credenciales de otro backend y sin
+> ninguna advertencia. Ver [DEPLOY.md](DEPLOY.md), paso 2.
+
+El procedimiento completo de puesta en marcha en el servidor está en
+[DEPLOY.md](DEPLOY.md).
 
 > **Un solo proceso, no negociable.** Las sesiones, los locks de conversación y
 > el registro de mensajes ya procesados viven en la memoria del proceso. Con más
@@ -168,8 +175,19 @@ python smoke_test.py
 ```
 
 Recorre los dos flujos de punta a punta contra un doble de LOLCLI y de
-Evolution. No toca la red ni necesita credenciales, e imprime la conversación
+Evolution. No toca la red ni manda mensajes reales, e imprime la conversación
 tal como se vería en el teléfono.
+
+Credenciales válidas no necesita, pero **sí necesita configuración**: la URL de
+LOLCLI del flujo de pacientes tiene que estar definida y no vacía, venga de
+`clinics.json` (`lolcli_url_pacientes` o `lolcli_url`) o del `.env`
+(`LOLCLI_API_URL`). El valor da igual —la red está simulada—, pero si queda
+vacío `preload_lists` corta en seco (`if not url_base: return`) sin llegar a
+llamar al doble, y fallan 11 comprobaciones con `error_loading_lists`: parecen
+un bot roto y son sólo configuración ausente.
+
+En una máquina recién clonada, sin `clinics.json` todavía, basta con copiar
+`.env.example` a `.env`.
 
 ---
 
