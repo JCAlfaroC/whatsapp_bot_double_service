@@ -69,15 +69,18 @@ CMD_ASESOR = ("ayuda", "asesor", "hablar con alguien", "hablar con asesor", "hab
 CMD_INICIO = ("inicio", "cambiar", "cambiar rol", "cambiar servicio", "menu principal", "empezar de nuevo")
 CMD_VOLVER_AL_BOT = ("bot", "volver", "asistente")
 
+# Los títulos van sin emoji y por debajo de 24 caracteres: es el máximo que
+# admite el título de una fila en las listas interactivas de WhatsApp, y lo que
+# sobra no se recorta, hace que la API rechace el mensaje entero.
 ROLE_ROWS = [
     {
         "id": "role_paciente",
-        "title": "🧑 Soy paciente",
+        "title": "Servicios para Pacientes",
         "description": "Agendar, consultar o reprogramar una cita",
     },
     {
         "id": "role_medico",
-        "title": "👨‍⚕️ Soy médico",
+        "title": "Servicios para Médicos",
         "description": "Reservar un quirófano",
     },
 ]
@@ -92,14 +95,14 @@ ROLE_KEYWORDS = {
 
 
 def _ask_role(session, phone):
-    send_whatsapp_message(
-        phone,
-        "👋 ¡Hola! Bienvenido/a a *LOLIMSA*. Soy el asistente virtual y puedo ayudarte con "
-        "tus *citas médicas* o con la *reserva de quirófanos*.",
-    )
+    # Un solo mensaje, no dos: la presentación va dentro del cuerpo de la lista.
+    # Antes se mandaba primero un saludo suelto y después el menú, y como cada
+    # envío espera SEND_PACING_SECONDS, el usuario veía dos globos separados
+    # para lo que es una sola pregunta.
     send_list_message(
         phone,
-        "Para empezar, cuéntame quién eres:",
+        "👋 ¡Hola! Soy *ARIE*, el asistente virtual de *LOLIMSA*.\n\n"
+        "Por favor indícanos qué deseas hacer:",
         sections=[{"title": "¿Cómo podemos ayudarte?", "rows": ROLE_ROWS}],
         title="Selecciona un servicio",
         button_text="Ver opciones",
