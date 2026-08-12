@@ -350,9 +350,19 @@ def _handle_message(key_sesion, phone, message_text, selected_id):
         _ask_role(session, phone)
         return "role_menu"
 
-    return flow.handle(
+    resultado = flow.handle(
         key_sesion, session, phone, message_text, selected_id, config.lolcli_headers()
     )
+
+    # Un flujo puede pedir la derivación a una persona cuando la reconoce por
+    # una opción suya de menú (p.ej. el "4" del menú de quirófanos). La
+    # derivación se resuelve aquí y no dentro del flujo porque necesita saber
+    # el rol para describir al usuario y a qué teléfono de soporte avisar.
+    if resultado == "request_handoff":
+        _trigger_human_handoff(session, phone)
+        return "handoff"
+
+    return resultado
 
 
 # ---------------------------------------------------------------------------

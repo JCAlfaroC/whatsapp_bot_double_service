@@ -401,6 +401,18 @@ def handle(session_key, session, phone, message_text, selected_id, lolcli_header
             )
             send_whatsapp_message(phone, "Escribe *'continuar'* para volver al menú.")
             session["state"] = "AWAITING_POST_FLOW"
+        elif choice in ["menu_asesor", "4", "hablar con un asesor"]:
+            # La derivación la resuelve app.py, que es quien sabe describir al
+            # usuario según su rol y a qué teléfono de soporte avisar.
+            #
+            # Hace falta esta rama porque app.py sólo reconoce la derivación
+            # por la palabra 'asesor' o por el id de la fila ('menu_asesor'), y
+            # el id sólo llega cuando WhatsApp manda una lista interactiva de
+            # verdad. Con EVOLUTION_INTERACTIVE=0 -- o cuando sendList falla y
+            # se cae al respaldo de texto, que es lo que pasa en el despliegue
+            # actual -- el médico ve "4. Hablar con un asesor" y escribe "4",
+            # que no coincidía con nada y caía en "elige una opción del menú".
+            return "request_handoff"
         else:
             send_whatsapp_message(phone, "❓ Elige una opción del menú. 😊")
 
