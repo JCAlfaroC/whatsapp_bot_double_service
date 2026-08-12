@@ -70,10 +70,29 @@ def send_whatsapp_message(phone, text, instance=None):
         _log_evolution_error("send_whatsapp_message", e)
 
 
+def _menu_en_texto(phone, body, titulos, inst):
+    """Menú numerado en texto plano.
+
+    Es el respaldo de listas y botones, y también el camino normal cuando
+    EVOLUTION_INTERACTIVE=0. La numeración arranca en 1 y respeta el orden de
+    las opciones, que es justo lo que interpreta process_user_choice, así que
+    el número que ve el usuario es el que entiende el bot.
+
+    No duerme: send_whatsapp_message ya espera SEND_PACING_SECONDS.
+    """
+    lineas = "\n".join(f"*{i}.* {t}" for i, t in enumerate(titulos, 1))
+    send_whatsapp_message(phone, f"{body}\n\n{lineas}", inst)
+
+
 def send_button_message(phone, body, buttons, instance=None, title="", footer="LOLIMSA"):
     """buttons = [{"id": "btn_id", "title": "Label"}, ...]  — máx. 3"""
-    time.sleep(config.SEND_PACING_SECONDS)
     inst = _resolve_instance(instance)
+
+    if not config.EVOLUTION_INTERACTIVE:
+        _menu_en_texto(phone, body, [b["title"] for b in buttons], inst)
+        return
+
+    time.sleep(config.SEND_PACING_SECONDS)
     payload = {
         "number": phone,
         "title": title,
@@ -95,8 +114,7 @@ def send_button_message(phone, body, buttons, instance=None, title="", footer="L
     except requests.exceptions.RequestException as e:
         _log_evolution_error("send_button_message", e)
         print("  -- falling back to text")
-        lines = "\n".join(f"*{i+1}.* {b['title']}" for i, b in enumerate(buttons))
-        send_whatsapp_message(phone, f"{body}\n\n{lines}", inst)
+        _menu_en_texto(phone, body, [b["title"] for b in buttons], inst)
 
 
 def send_list_message(phone, body, sections, instance=None, title="", button_text="Ver opciones", footer=""):
@@ -111,8 +129,14 @@ def send_list_message(phone, body, sections, instance=None, title="", button_tex
     respaldo de texto puede numerarlas 1, 2, 3... sin ambigüedad: el número que
     ve el usuario es el mismo que entiende process_user_choice.
     """
-    time.sleep(config.SEND_PACING_SECONDS)
     inst = _resolve_instance(instance)
+    titulos = [row["title"] for sec in sections for row in sec.get("rows", [])]
+
+    if not config.EVOLUTION_INTERACTIVE:
+        _menu_en_texto(phone, body, titulos, inst)
+        return
+
+    time.sleep(config.SEND_PACING_SECONDS)
     api_sections = [
         {
             "title": sec.get("title", ""),
@@ -142,11 +166,7 @@ def send_list_message(phone, body, sections, instance=None, title="", button_tex
     except requests.exceptions.RequestException as e:
         _log_evolution_error("send_list_message", e)
         print("  -- falling back to text")
-        lines = [
-            f"*{i}.* {row['title']}"
-            for i, row in enumerate([r for sec in sections for r in sec.get("rows", [])], 1)
-        ]
-        send_whatsapp_message(phone, f"{body}\n\n" + "\n".join(lines), inst)
+        _menu_en_texto(phone, body, titulos, inst)
 
 
 # ---------------------------------------------------------------------------

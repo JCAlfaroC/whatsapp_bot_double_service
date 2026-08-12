@@ -49,6 +49,21 @@ EVOLUTION_TIMEOUT = int(os.getenv("EVOLUTION_TIMEOUT", 15))
 # valor multiplica la latencia de cada paso del flujo.
 SEND_PACING_SECONDS = float(os.getenv("SEND_PACING_SECONDS", 1.2))
 
+# Mensajes interactivos (listas y botones). Con 0 el bot no los intenta: manda
+# directamente el menú numerado en texto.
+#
+# No todas las instalaciones de Evolution los soportan. En la de LOLIMSA,
+# /message/sendList responde 400 con
+# {"message":["TypeError: this.isZero is not a function"]} -- un fallo interno
+# de Baileys, no del payload -- así que cada menú gastaba una petición
+# condenada a fallar, esperaba dos veces SEND_PACING_SECONDS (una por el
+# intento y otra por el respaldo) y dejaba una línea ERROR en el log. El
+# usuario nunca llegaba a ver una lista: siempre el texto de respaldo.
+#
+# Se deja en 1 por defecto para no cambiar el comportamiento donde sí
+# funcionan; en el .env del despliegue que no los soporta se pone 0.
+EVOLUTION_INTERACTIVE = os.getenv("EVOLUTION_INTERACTIVE", "1") == "1"
+
 # --- Pasarela de pagos de quirófanos -------------------------------------
 # El flujo de pago de quirófanos queda montado pero DESACTIVADO: todavía no
 # llegan las URLs ni las credenciales de la pasarela. Con PAGOS_HABILITADOS=0 el
