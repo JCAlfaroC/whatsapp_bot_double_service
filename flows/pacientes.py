@@ -779,13 +779,28 @@ def _dni_invalido(tidcod, doc_number):
 
 
 def _validar_paciente(tidcod, doc_number, lolcli_headers):
+    """(pacientes, hubo_error_de_servidor) de ValidarPacienteWsp.
+
+    Devuelve el fallo por separado -- igual que _citas_del_paciente-- porque
+    una lista vacía es ambigua: puede significar "ese documento no está
+    registrado" o "LOLCLI no pudo responder". Antes las dos se trataban igual y
+    un 500 acababa diciéndole al paciente "no encontramos ningún paciente
+    registrado con ese documento, acércate personalmente a tu sede": se manda a
+    alguien a la clínica en persona por una caída del servidor, y encima se le
+    cierra la sesión.
+    """
     response = requests.post(
         _url("ValidarPacienteWsp"),
         json={"tidcod": tidcod, "pacdoc": doc_number},
         headers=lolcli_headers,
         timeout=config.LOLCLI_TIMEOUT,
     )
-    return response.json().get("paciente", [])
+    data = response.json()
+    print(f"INFO: ValidarPacienteWsp (tidcod={tidcod}) -> HTTP {response.status_code}, "
+          f"respuesta: {data}")
+    server_error = response.status_code >= 500 or data.get("code") == 500
+    pacientes = data.get("paciente", []) if not server_error else []
+    return pacientes, server_error
 
 
 def _resolver_paciente_y_continuar(session, session_key, phone_to_reply, doc_number, lolcli_headers):
@@ -795,7 +810,19 @@ def _resolver_paciente_y_continuar(session, session_key, phone_to_reply, doc_num
     Es el tramo común de "agendar cita" y "agendar reevaluación": los dos piden
     tipo y número de documento y siguen igual a partir de aquí.
     """
-    pacientes = _validar_paciente(session.get("tidcod"), doc_number, lolcli_headers)
+    pacientes, error_servidor = _validar_paciente(
+        session.get("tidcod"), doc_number, lolcli_headers
+    )
+
+    if error_servidor:
+        # No se sabe si el paciente existe: LOLCLI no contestó bien. Se le pide
+        # reintentar y NO se cierra la sesión, para que pueda hacerlo.
+        send_whatsapp_message(
+            phone_to_reply,
+            "😔 No pudimos verificar tu documento en este momento. "
+            "Vuelve a escribirlo en unos minutos, por favor. 🙏",
+        )
+        return "server_error"
 
     if pacientes and pacientes[0].get("valido") == "S":
         paciente = pacientes[0]
@@ -1291,7 +1318,16 @@ def handle(session_key, session, phone_to_reply, message_text, selected_id, lolc
             )
             return "invalid_dni"
         try:
-            pacientes = _validar_paciente(session.get("tidcod"), doc_number, lolcli_headers)
+            pacientes, error_servidor = _validar_paciente(
+                session.get("tidcod"), doc_number, lolcli_headers
+            )
+            if error_servidor:
+                send_whatsapp_message(
+                    phone_to_reply,
+                    "😔 No pudimos verificar tu documento en este momento. "
+                    "Vuelve a escribirlo en unos minutos, por favor. 🙏",
+                )
+                return "server_error"
             if not pacientes:
                 send_whatsapp_message(
                     phone_to_reply,
@@ -1723,7 +1759,7 @@ def _buscar_citas_reprogramables(session, session_key, phone_to_reply, message_t
         # reprogramar. Si esto falla o vuelve vacío, no se bloquea el flujo:
         # hay un segundo intento justo antes del pago.
         try:
-            pacientes = _validar_paciente(tidcod, doc_number, lolcli_headers)
+            pacientes, _ = _validar_paciente(tidcod, doc_number, lolcli_headers)
             if pacientes:
                 session["pachis"] = pacientes[0].get("pachis")
         except Exception as e:
@@ -1815,7 +1851,7 @@ def _preparar_pago_reprogramacion(session, session_key, phone_to_reply, lolcli_h
         # enviar una solicitud que sabemos que va a fallar.
         if not session.get("pachis"):
             try:
-                retry_pacientes = _validar_paciente(
+                retry_pacientes, _ = _validar_paciente(
                     session.get("tidcod"), session.get("pacdoc"), lolcli_headers
                 )
                 if retry_pacientes:
