@@ -634,6 +634,17 @@ def generate_reschedule_payment_link_and_send(session, phone_to_reply, headers):
 
 
 def continue_appointment_flow(session, phone_to_reply, lolcli_headers):
+    # Arranca un trámite nuevo: se descarta la cita del trámite ANTERIOR.
+    #
+    # _registrar_cita usa invnum_cita como guardia para no grabar dos veces la
+    # misma cita, y ese guardia sólo es correcto si se refiere al intento en
+    # curso. 'continuar' pasa por soft_reset() y limpia la sesión entera, pero
+    # 'retroceder' no: sin esto, un paciente que agenda, retrocede y vuelve a
+    # avanzar para agendar otra cita se encontraría con el guardia disparado y
+    # recibiría el enlace de pago de la cita vieja en vez de una cita nueva.
+    session.pop("invnum_cita", None)
+    session.pop("prfnum_cita", None)
+
     send_whatsapp_message(
         phone_to_reply,
         "✅ ¡Excelente! Ya tenemos tus datos. Ahora continuemos con los detalles de tu cita. 😊",
